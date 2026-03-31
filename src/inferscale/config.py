@@ -98,7 +98,6 @@ DEFAULT_FRAMEWORKS: list[FrameworkConfig] = [
         description="Serve Transformers models with HuggingFace",
         model_format="huggingface",
         runtime="kserve-huggingfaceserver",
-        default_args=[*COMMON_ARGS, "--backend=huggingface"],
     ),
 ]
 
