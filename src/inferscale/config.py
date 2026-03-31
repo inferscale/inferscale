@@ -124,6 +124,10 @@ class Settings(BaseSettings):
 
     kserve_namespace: str
     kserve_service_account: str
+    kserve_group: str = "serving.kserve.io"
+    kserve_version: str = "v1beta1"
+    kserve_plural: str = "inferenceservices"
+    kserve_container: str = "kserve-container"
 
     grafana_url: str
     grafana_dashboard_uid: str
