@@ -129,6 +129,28 @@ class K8sClient:
             for p in (pods.items or [])
         ]
 
+    async def has_crashed_pods(self, namespace: str, label_selector: str) -> bool:
+        v1 = self._get_core_api()
+        try:
+            pods = await asyncio.to_thread(
+                v1.list_namespaced_pod,
+                namespace=namespace,
+                label_selector=label_selector,
+            )
+        except ApiException:
+            return False
+        crash_states = {"CrashLoopBackOff", "ImagePullBackOff", "ErrImagePull"}
+        for p in pods.items or []:
+            for cs in p.status.container_statuses or []:
+                waiting = cs.state.waiting
+                if waiting and waiting.reason in crash_states:
+                    return True
+            for cs in p.status.init_container_statuses or []:
+                waiting = cs.state.waiting
+                if waiting and waiting.reason in crash_states:
+                    return True
+        return False
+
     async def get_pod_logs(
         self, pod_name: str, namespace: str, container: str, tail_lines: int = 100
     ) -> str:
