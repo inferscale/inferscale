@@ -58,10 +58,13 @@ def _parse_status(obj: dict[str, Any]) -> dict[str, Any]:
     if ready_condition and ready_condition.get("status") == "True":
         return {"status": EndpointStatus.RUNNING, "url": url}
 
-    if model_state == "Loading":
-        return {"status": EndpointStatus.CREATING, "url": None}
+    if ready_condition:
+        reason = (ready_condition.get("reason") or "").lower()
+        message = (ready_condition.get("message") or "").lower()
+        if "insufficient" in reason or "insufficient" in message:
+            return {"status": EndpointStatus.PENDING, "url": None}
 
-    return {"status": EndpointStatus.PENDING, "url": None}
+    return {"status": EndpointStatus.CREATING, "url": None}
 
 
 async def create_inference_service(
