@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from inferscale.clients.k8s import K8sClient
 from inferscale.config import EndpointStatus, settings
 from inferscale.db.models import InferenceEndpoint, MLModel
 from inferscale.services import predictive_service
@@ -15,6 +16,7 @@ logger = logging.getLogger(__name__)
 
 async def create_endpoint(
     session: AsyncSession,
+    k8s: K8sClient,
     *,
     name: str,
     model: MLModel,
@@ -43,6 +45,7 @@ async def create_endpoint(
     namespace = settings.kserve_namespace
 
     await predictive_service.create_inference_service(
+        k8s,
         name=kserve_name,
         framework=runtime,
         storage_uri=model.model_path,
@@ -118,10 +121,10 @@ async def get_endpoint(session: AsyncSession, endpoint_id: UUID) -> InferenceEnd
     return result.scalar_one_or_none()
 
 
-async def refresh_status(endpoint: InferenceEndpoint) -> str | None:
+async def refresh_status(k8s: K8sClient, endpoint: InferenceEndpoint) -> str | None:
     try:
         k8s_status = await predictive_service.get_inference_service_status(
-            endpoint.kserve_name, endpoint.namespace
+            k8s, endpoint.kserve_name, endpoint.namespace
         )
         endpoint.status = k8s_status["status"].value
         return k8s_status["url"]
@@ -131,6 +134,7 @@ async def refresh_status(endpoint: InferenceEndpoint) -> str | None:
 
 
 async def refresh_statuses(
+    k8s: K8sClient,
     endpoints: list[InferenceEndpoint],
 ) -> dict[str, str | None]:
     url_map: dict[str, str | None] = {}
@@ -139,7 +143,7 @@ async def refresh_statuses(
 
     results = await asyncio.gather(
         *(
-            predictive_service.get_inference_service_status(ep.kserve_name, ep.namespace)
+            predictive_service.get_inference_service_status(k8s, ep.kserve_name, ep.namespace)
             for ep in endpoints
         ),
         return_exceptions=True,
@@ -154,13 +158,17 @@ async def refresh_statuses(
     return url_map
 
 
-async def delete_endpoint(session: AsyncSession, endpoint: InferenceEndpoint) -> None:
+async def delete_endpoint(
+    session: AsyncSession, k8s: K8sClient, endpoint: InferenceEndpoint
+) -> None:
     previous_status = endpoint.status
     endpoint.status = EndpointStatus.DELETING
     await session.commit()
 
     try:
-        await predictive_service.delete_inference_service(endpoint.kserve_name, endpoint.namespace)
+        await predictive_service.delete_inference_service(
+            k8s, endpoint.kserve_name, endpoint.namespace
+        )
     except Exception:
         endpoint.status = previous_status
         await session.commit()

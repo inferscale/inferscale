@@ -164,7 +164,9 @@ class K8sClient:
                 tail_lines=tail_lines,
             )
             return logs
-        except ApiException:
+        except ApiException as exc:
+            if exc.status == 400 and "waiting to start" in (exc.body or ""):
+                return "Container is waiting to start (pod is initializing)...\n"
             logger.warning("Failed to read logs for pod %s", pod_name, exc_info=True)
             return ""
 

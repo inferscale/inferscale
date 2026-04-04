@@ -1,7 +1,7 @@
 import logging
 from typing import Any
 
-from inferscale.clients.k8s import k8s_client
+from inferscale.clients.k8s import K8sClient
 from inferscale.config import EndpointStatus, FrameworkConfig, settings
 
 logger = logging.getLogger(__name__)
@@ -58,13 +58,17 @@ def _parse_status(obj: dict[str, Any]) -> dict[str, Any]:
     if ready_condition and ready_condition.get("status") == "True":
         return {"status": EndpointStatus.RUNNING, "url": url}
 
-    if model_state == "Loading":
-        return {"status": EndpointStatus.CREATING, "url": None}
+    if ready_condition:
+        reason = (ready_condition.get("reason") or "").lower()
+        message = (ready_condition.get("message") or "").lower()
+        if "insufficient" in reason or "insufficient" in message:
+            return {"status": EndpointStatus.PENDING, "url": None}
 
-    return {"status": EndpointStatus.PENDING, "url": None}
+    return {"status": EndpointStatus.CREATING, "url": None}
 
 
 async def create_inference_service(
+    k8s: K8sClient,
     name: str,
     framework: str,
     storage_uri: str,
@@ -115,15 +119,15 @@ async def create_inference_service(
         },
     }
 
-    result = await k8s_client.create_custom_object(
+    result = await k8s.create_custom_object(
         settings.kserve_group, settings.kserve_version, namespace, settings.kserve_plural, body
     )
     logger.info("Created InferenceService %s in namespace %s", name, namespace)
     return result
 
 
-async def get_inference_service_status(name: str, namespace: str) -> dict[str, Any]:
-    obj = await k8s_client.get_custom_object(
+async def get_inference_service_status(k8s: K8sClient, name: str, namespace: str) -> dict[str, Any]:
+    obj = await k8s.get_custom_object(
         settings.kserve_group, settings.kserve_version, namespace, settings.kserve_plural, name
     )
     if obj is None:
@@ -133,14 +137,14 @@ async def get_inference_service_status(name: str, namespace: str) -> dict[str, A
 
     if result["status"] in (EndpointStatus.PENDING, EndpointStatus.CREATING):
         label = f"serving.kserve.io/inferenceservice={name}"
-        if await k8s_client.has_crashed_pods(namespace, label):
+        if await k8s.has_crashed_pods(namespace, label):
             return {"status": EndpointStatus.FAILED, "url": None}
 
     return result
 
 
-async def delete_inference_service(name: str, namespace: str) -> bool:
-    deleted = await k8s_client.delete_custom_object(
+async def delete_inference_service(k8s: K8sClient, name: str, namespace: str) -> bool:
+    deleted = await k8s.delete_custom_object(
         settings.kserve_group, settings.kserve_version, namespace, settings.kserve_plural, name
     )
     if deleted:
@@ -148,17 +152,17 @@ async def delete_inference_service(name: str, namespace: str) -> bool:
     return deleted
 
 
-async def list_predictor_pods(name: str, namespace: str) -> list[dict[str, str]]:
-    return await k8s_client.list_pods(
+async def list_predictor_pods(k8s: K8sClient, name: str, namespace: str) -> list[dict[str, str]]:
+    return await k8s.list_pods(
         namespace, label_selector=f"serving.kserve.io/inferenceservice={name}"
     )
 
 
-async def get_pod_logs(pod_name: str, namespace: str, tail_lines: int = 100) -> str:
-    return await k8s_client.get_pod_logs(pod_name, namespace, settings.kserve_container, tail_lines)
+async def get_pod_logs(k8s: K8sClient, pod_name: str, namespace: str, tail_lines: int = 100) -> str:
+    return await k8s.get_pod_logs(pod_name, namespace, settings.kserve_container, tail_lines)
 
 
-async def list_inference_services(namespace: str) -> list[dict[str, Any]]:
-    return await k8s_client.list_custom_objects(
+async def list_inference_services(k8s: K8sClient, namespace: str) -> list[dict[str, Any]]:
+    return await k8s.list_custom_objects(
         settings.kserve_group, settings.kserve_version, namespace, settings.kserve_plural
     )
